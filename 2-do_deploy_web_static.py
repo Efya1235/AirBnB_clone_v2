@@ -1,64 +1,63 @@
 #!/usr/bin/python3
-"""
-Fabric script to distribute an archive to web
-servers using the do_deploy function.
-"""
+"""Fabric script (based on the file 1-pack_web_static.py) that distributes an
+archive to your web servers, using the function do_deploy:"""
 
 from fabric.api import *
-from os import path
+import os
+from datetime import datetime
 
-# Define the web server IPs and username for Fabric
-env.hosts = ['34.229.72.79', '54.172.77.223']
 env.user = 'ubuntu'
-env.key_filename = '~/.ssh/id_rsa'
+env.hosts = ['34.229.72.79', '54.172.77.223']
 
-def do_deploy(archive_path):
+
+def do_pack():
+    """ Generates a .tgz archive from the contents of the
+    web_static folder
     """
-    Distribute the compressed web static package to web servers.
+    now = datetime.today()
+    file = f"versions/web_static_{now.year}{now.month:02d}{now.day:02d}{now.hour:02d}" \
+           f"{now.minute:02d}{now.second:02d}.tgz"
 
-    :param archive_path: Path to the compressed archive on the local machine.
-    :return: True if deployment is successful, False otherwise.
-    """
+    print(f"Packing web_static to {file}")
+    if not os.path.exists("versions/"):
+        local("mkdir versions/")
 
-    try:
-        # Check if the archive file exists
-        if not path.exists(archive_path):
-            return False
+    res = local(f"tar -cvzf {file} web_static/")
+    if res.failed:
+        return None
+    else:
+        archive_size = os.path.getsize(file)
+        print(f"web_static packed: {file} -> {archive_size} Bytes")
+        return file
 
-        # Upload the archive to the /tmp/ directory on the web server
-        put(archive_path, '/tmp/')
-
-        # Extract filename without extension to use as timestamp
-        timestamp = archive_path.split('/')[-1].split('.')[0]
-
-        # Create target directory for deployment
-        run('sudo mkdir -p /data/web_static/releases/web_static_{}/'.format(timestamp))
-
-        # Uncompress the archive to the target directory
-        run('sudo tar -xzf /tmp/{}.tgz -C /data/web_static/releases/web_static_{}/'
-            .format(timestamp, timestamp))
-
-        # Remove the uploaded archive
-        run('sudo rm /tmp/{}.tgz'.format(timestamp))
-
-        # Move contents into the target directory
-        run('sudo mv /data/web_static/releases/web_static_{}/web_static/* '
-            '/data/web_static/releases/web_static_{}/'.format(timestamp, timestamp))
-
-        # Remove the extraneous web_static directory
-        run('sudo rm -rf /data/web_static/releases/web_static_{}/web_static'
-            .format(timestamp))
-
-        # Delete pre-existing symbolic link
-        run('sudo rm -rf /data/web_static/current')
-
-        # Create a new symbolic link
-        run('sudo ln -s /data/web_static/releases/web_static_{}/ '
-            '/data/web_static/current'.format(timestamp))
-
-        # Return True on success
-        return True
-
-    except Exception as e:
-        print(f"An error occurred: {e}")
+def do_deploy(archive_p):
+    """Distributes an archive to the web servers"""
+    if not os.path.exists(archive_p):
         return False
+
+    path = archive_p.split('/')
+    archive_file = path[1]
+    splitted_arhive = archive_file.split('.')
+
+    server_archive_path = f'/tmp/{archive_file}'
+    xarch_path = f'/data/web_static/releases/{splitted_arhive[0]}'
+
+    if put(archive_p, '/tmp/').failed:
+        return False
+    if run(f'mkdir -p {xarch_path}').failed:
+        return False
+    if run(f'tar -xzf {server_archive_path} -C {xarch_path}').failed:
+        return False
+    if run(f'rm {server_archive_path}').failed:
+        return False
+    if run(f'mv {xarch_path}/web_static/* {xarch_path}').failed:
+        return False
+    if run(f'rm -rf {xarch_path}/web_static').failed:
+        return False
+    if run('rm -rf /data/web_static/current').failed:
+        return False
+    if run(f'ln -s {xarch_path} /data/web_static/current').failed:
+        return False
+
+    print('New version deployed!')
+    return True
